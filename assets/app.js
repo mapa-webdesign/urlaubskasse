@@ -19,6 +19,12 @@ const $$ = (sel, root = app) => [...root.querySelectorAll(sel)];
 const formData = (form) => Object.fromEntries(new FormData(form).entries());
 const shareLink = (token) => `${location.origin}/r/${token}`;
 
+/** Navigieren – auch wenn der Hash gleich bleibt (sonst feuert kein hashchange). */
+function go(hash) {
+  if (location.hash === hash) route();
+  else location.hash = hash;
+}
+
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* egal */ } },
@@ -92,7 +98,7 @@ function renderNav() {
   }
   if (me.user) {
     nav.innerHTML = `<a href="#/">Meine Reisen</a><span class="muted hide-sm">${esc(me.user.name)}</span><button class="link" id="logout">Abmelden</button>`;
-    document.getElementById('logout').onclick = async () => { await api('logout', {}); await refreshMe(); location.hash = '#/'; };
+    document.getElementById('logout').onclick = async () => { await api('logout', {}); await refreshMe(); go('#/'); };
   } else {
     nav.innerHTML = '';
   }
@@ -132,7 +138,7 @@ function viewAuth(mode) {
   const reg = mode === 'register';
   app.innerHTML = `
     <section class="hero">
-      <img src="assets/logo.png?v=7" alt="" width="84" height="84" class="hero-logo">
+      <img src="assets/logo.png?v=8" alt="" width="84" height="84" class="hero-logo">
       <h1>Urlaubskosten fair aufteilen</h1>
       <p>Alle tragen ihre Ausgaben ein, die Kosten werden nach Übernachtungen verteilt – und am Ende steht fest, wer wem wieviel überweist.</p>
     </section>
@@ -154,7 +160,7 @@ function viewAuth(mode) {
   onSubmit($('#auth'), async (d) => {
     await api(reg ? 'register' : 'login', d);
     await refreshMe();
-    location.hash = '#/';
+    go('#/');
   });
 }
 
@@ -193,7 +199,7 @@ async function viewDashboard() {
   form.end_date.onchange = syncNights;
   onSubmit(form, async (d) => {
     const r = await api('trips.create', d);
-    location.hash = `#/trip/${r.id}/people`;
+    go(`#/trip/${r.id}/people`);
   });
 }
 
@@ -447,7 +453,7 @@ function renderPeople() {
     try {
       await api('trips.delete', { id: t.id });
       trip = null;
-      location.hash = '#/';
+      go('#/');
     } catch (e) { toast(e.message, true); }
   };
 }

@@ -78,14 +78,14 @@ $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <title>Einrichtung – Urlaubskasse</title>
-  <link rel="icon" href="assets/favicon-32.png?v=7" sizes="32x32" type="image/png">
-  <link rel="icon" href="assets/logo.png?v=7" sizes="192x192" type="image/png">
-  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=7">
+  <link rel="icon" href="assets/favicon-32.png?v=8" sizes="32x32" type="image/png">
+  <link rel="icon" href="assets/logo.png?v=8" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=8">
   <meta name="apple-mobile-web-app-title" content="Urlaubskasse">
-  <link rel="stylesheet" href="assets/style.css?v=7">
+  <link rel="stylesheet" href="assets/style.css?v=8">
 </head>
 <body>
-  <header class="topbar"><a href="./" class="brand"><img src="assets/logo.png?v=7" alt="" width="30" height="30"> Urlaubskasse</a></header>
+  <header class="topbar"><a href="./" class="brand"><img src="assets/logo.png?v=8" alt="" width="30" height="30"> Urlaubskasse</a></header>
   <main class="container">
     <div class="card narrow">
       <p class="eyebrow">Einrichtung</p>
