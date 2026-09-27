@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Urlaubskasse">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+    <linearGradient id="coin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <clipPath id="r"><rect width="64" height="64" rx="15"/></clipPath>
+  </defs>
+  <g clip-path="url(#r)">
+    <rect width="64" height="64" fill="url(#sky)"/>
+    <circle cx="32" cy="31" r="16" fill="url(#coin)" stroke="#fbbf24" stroke-width="1.5"/>
+    <circle cx="32" cy="31" r="12.5" fill="none" stroke="#b45309" stroke-opacity=".35" stroke-width="1.2"/>
+    <g fill="none" stroke="#92400e" stroke-width="2.6" stroke-linecap="round">
+      <path d="M37.5 24.8a7.6 7.6 0 1 0 0 12.4"/>
+      <path d="M24.5 29H34M24.5 33.2H33"/>
+    </g>
+    <path d="M0 42q8-5 16 0t16 0 16 0 16 0V64H0Z" fill="#0b4f4a"/>
+    <path d="M0 50q8-4 16 0t16 0 16 0 16 0" fill="none" stroke="#5eead4" stroke-opacity=".55" stroke-width="2"/>
+    <path d="M0 57q8-4 16 0t16 0 16 0 16 0" fill="none" stroke="#5eead4" stroke-opacity=".3" stroke-width="2"/>
+  </g>
+</svg>
