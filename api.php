@@ -101,13 +101,12 @@ function expense_in_trip(int $eid): array
     return $e;
 }
 
-function create_participant(int $tripId, string $name, int $nights, bool $owner): array
+function create_participant(int $tripId, string $name, int $nights, bool $owner): int
 {
-    $pw = generate_password();
-    $token = generate_token();
+    // token/password_hash werden nicht mehr genutzt (Zugang über Reise-Link), Spalten sind aber NOT NULL.
     db()->prepare('INSERT INTO participants (trip_id, name, nights, token, password_hash, is_owner, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        ->execute([$tripId, $name, $nights, $token, password_hash($pw, PASSWORD_DEFAULT), $owner ? 1 : 0, now()]);
-    return ['id' => (int)db()->lastInsertId(), 'token' => $token, 'password' => $pw];
+        ->execute([$tripId, $name, $nights, generate_token(), '', $owner ? 1 : 0, now()]);
+    return (int)db()->lastInsertId();
 }
 
 function trip_payload(int $tripId): array
@@ -115,20 +114,16 @@ function trip_payload(int $tripId): array
     $acc = trip_access($tripId);
     $isOwner = $acc['role'] === 'owner';
 
-    $st = db()->prepare('SELECT id, name, nights, token, is_owner FROM participants WHERE trip_id = ? ORDER BY is_owner DESC, name');
+    $st = db()->prepare('SELECT id, name, nights, is_owner FROM participants WHERE trip_id = ? ORDER BY is_owner DESC, name');
     $st->execute([$tripId]);
-    $participants = [];
-    foreach ($st->fetchAll() as $p) {
-        $participants[] = [
-            'id' => (int)$p['id'],
-            'name' => $p['name'],
-            'nights' => (int)$p['nights'],
-            'is_owner' => (bool)$p['is_owner'],
-            'token' => $isOwner ? $p['token'] : null,
-        ];
-    }
+    $participants = array_map(fn($p) => [
+        'id' => (int)$p['id'],
+        'name' => $p['name'],
+        'nights' => (int)$p['nights'],
+        'is_owner' => (bool)$p['is_owner'],
+    ], $st->fetchAll());
 
-    $st = db()->prepare('SELECT id, participant_id, description, amount_cents, expense_date, created_at FROM expenses WHERE trip_id = ? ORDER BY COALESCE(expense_date, created_at) DESC, id DESC');
+    $st = db()->prepare('SELECT id, participant_id, description, amount_cents, expense_date FROM expenses WHERE trip_id = ? ORDER BY COALESCE(expense_date, created_at) DESC, id DESC');
     $st->execute([$tripId]);
     $expenses = array_map(fn($e) => [
         'id' => (int)$e['id'],
@@ -138,15 +133,16 @@ function trip_payload(int $tripId): array
         'expense_date' => $e['expense_date'],
     ], $st->fetchAll());
 
+    $t = $acc['trip'];
     return [
         'trip' => [
-            'id' => (int)$acc['trip']['id'],
-            'name' => $acc['trip']['name'],
-            'start_date' => $acc['trip']['start_date'],
-            'end_date' => $acc['trip']['end_date'],
+            'id' => (int)$t['id'],
+            'name' => $t['name'],
+            'start_date' => $t['start_date'],
+            'end_date' => $t['end_date'],
+            'share_token' => $isOwner ? $t['share_token'] : null,
         ],
         'role' => $acc['role'],
-        'me_id' => $acc['me'] ? (int)$acc['me']['id'] : null,
         'participants' => $participants,
         'expenses' => $expenses,
         'settlement' => settle($participants, $expenses),
@@ -162,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $in = json_decode(file_get_contents('php://input') ?: '[]', true);
     if (!is_array($in)) fail('Ungültige Anfrage.');
     check_csrf();
-} elseif (!in_array($action, ['me', 'trips.list', 'trips.get', 'join.info'], true)) {
+} elseif (!in_array($action, ['me', 'trips.list', 'trips.get'], true)) {
     fail('Methode nicht erlaubt.', 405);
 }
 
@@ -173,12 +169,7 @@ switch ($action) {
             $user = fetch_one('SELECT id, name, email FROM users WHERE id = ?', [$uid]);
             if (!$user) unset($_SESSION['user_id']);
         }
-        $joined = [];
-        foreach ($_SESSION['joined'] as $tid => $pid) {
-            $row = fetch_one('SELECT t.id, t.name AS trip_name, p.name FROM participants p JOIN trips t ON t.id = p.trip_id WHERE p.id = ? AND t.id = ?', [$pid, $tid]);
-            if ($row) $joined[] = ['trip_id' => (int)$row['id'], 'trip_name' => $row['trip_name'], 'name' => $row['name']];
-        }
-        out(['csrf' => $_SESSION['csrf'], 'user' => $user, 'joined' => $joined]);
+        out(['csrf' => $_SESSION['csrf'], 'user' => $user]);
 
     case 'register':
         $name = str_in($in, 'name', 100);
@@ -212,24 +203,6 @@ switch ($action) {
         session_regenerate_id(true);
         out(['ok' => true]);
 
-    case 'join.info':
-        $p = fetch_one('SELECT p.name, t.name AS trip_name FROM participants p JOIN trips t ON t.id = p.trip_id WHERE p.token = ?', [(string)($_GET['token'] ?? '')]);
-        if (!$p) fail('Einladungslink ungültig.', 404);
-        out(['name' => $p['name'], 'trip_name' => $p['trip_name']]);
-
-    case 'join':
-        $key = 'join:' . client_ip();
-        rate_limit_check($key);
-        $p = fetch_one('SELECT id, trip_id, password_hash FROM participants WHERE token = ?', [(string)($in['token'] ?? '')]);
-        if (!$p || !password_verify((string)($in['password'] ?? ''), $p['password_hash'])) {
-            rate_limit_hit($key);
-            fail('Passwort falsch.', 401);
-        }
-        rate_limit_clear($key);
-        session_regenerate_id(true);
-        $_SESSION['joined'][(int)$p['trip_id']] = (int)$p['id'];
-        out(['trip_id' => (int)$p['trip_id']]);
-
     case 'trips.list':
         $uid = require_user();
         $st = db()->prepare('SELECT t.id, t.name, t.start_date, t.end_date,
@@ -246,26 +219,38 @@ switch ($action) {
         $uid = require_user();
         $user = fetch_one('SELECT name FROM users WHERE id = ?', [$uid]);
         db()->beginTransaction();
-        db()->prepare('INSERT INTO trips (owner_user_id, name, start_date, end_date, created_at) VALUES (?, ?, ?, ?, ?)')
-            ->execute([$uid, str_in($in, 'name', 150), date_in($in, 'start_date'), date_in($in, 'end_date'), now()]);
+        db()->prepare('INSERT INTO trips (owner_user_id, name, start_date, end_date, share_token, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$uid, str_in($in, 'name', 150), date_in($in, 'start_date'), date_in($in, 'end_date'), generate_token(), now()]);
         $tripId = (int)db()->lastInsertId();
         create_participant($tripId, $user['name'], int_in($in + ['nights' => 0], 'nights'), true);
         db()->commit();
         out(['id' => $tripId]);
 
     case 'trips.get':
-        out(trip_payload((int)($_GET['id'] ?? 0)));
+        $id = (int)($_GET['id'] ?? 0);
+        if (!$id && share_token_in() !== '') {
+            $t = fetch_one('SELECT id FROM trips WHERE share_token = ?', [share_token_in()]);
+            if (!$t) fail('Dieser Reise-Link ist ungültig oder wurde erneuert.', 404);
+            $id = (int)$t['id'];
+        }
+        out(trip_payload($id));
 
     case 'trips.update':
         $acc = trip_access((int)($in['id'] ?? 0));
-        if ($acc['role'] !== 'owner') fail('Nur der Organisator darf die Reise bearbeiten.', 403);
+        require_owner($acc);
         db()->prepare('UPDATE trips SET name = ?, start_date = ?, end_date = ? WHERE id = ?')
             ->execute([str_in($in, 'name', 150), date_in($in, 'start_date'), date_in($in, 'end_date'), $acc['trip']['id']]);
         out(trip_payload((int)$acc['trip']['id']));
 
+    case 'trips.resetShare':
+        $acc = trip_access((int)($in['id'] ?? 0));
+        require_owner($acc);
+        db()->prepare('UPDATE trips SET share_token = ? WHERE id = ?')->execute([generate_token(), $acc['trip']['id']]);
+        out(trip_payload((int)$acc['trip']['id']));
+
     case 'trips.delete':
         $acc = trip_access((int)($in['id'] ?? 0));
-        if ($acc['role'] !== 'owner') fail('Nur der Organisator darf die Reise löschen.', 403);
+        require_owner($acc);
         $tid = (int)$acc['trip']['id'];
         db()->beginTransaction();
         db()->prepare('DELETE FROM expenses WHERE trip_id = ?')->execute([$tid]);
@@ -276,32 +261,21 @@ switch ($action) {
 
     case 'participants.create':
         $acc = trip_access((int)($in['trip_id'] ?? 0));
-        if ($acc['role'] !== 'owner') fail('Nur der Organisator darf Teilnehmer einladen.', 403);
-        $created = create_participant((int)$acc['trip']['id'], str_in($in, 'name', 100), int_in($in, 'nights'), false);
-        out(['invite' => $created] + trip_payload((int)$acc['trip']['id']));
+        require_owner($acc);
+        create_participant((int)$acc['trip']['id'], str_in($in, 'name', 100), int_in($in, 'nights'), false);
+        out(trip_payload((int)$acc['trip']['id']));
 
     case 'participants.update':
         $acc = trip_access((int)($in['trip_id'] ?? 0));
         $p = participant_in_trip((int)($in['id'] ?? 0), (int)$acc['trip']['id']);
-        if ($acc['role'] !== 'owner' && (int)$p['id'] !== (int)$acc['me']['id']) {
-            fail('Du kannst nur deine eigenen Angaben ändern.', 403);
-        }
+        $name = $acc['role'] === 'owner' ? str_in($in, 'name', 100) : $p['name'];
         db()->prepare('UPDATE participants SET name = ?, nights = ? WHERE id = ?')
-            ->execute([str_in($in, 'name', 100), int_in($in, 'nights'), $p['id']]);
+            ->execute([$name, int_in($in, 'nights'), $p['id']]);
         out(trip_payload((int)$acc['trip']['id']));
-
-    case 'participants.resetPassword':
-        $acc = trip_access((int)($in['trip_id'] ?? 0));
-        if ($acc['role'] !== 'owner') fail('Nur der Organisator darf Passwörter zurücksetzen.', 403);
-        $p = participant_in_trip((int)($in['id'] ?? 0), (int)$acc['trip']['id']);
-        $pw = generate_password();
-        db()->prepare('UPDATE participants SET password_hash = ? WHERE id = ?')
-            ->execute([password_hash($pw, PASSWORD_DEFAULT), $p['id']]);
-        out(['invite' => ['id' => (int)$p['id'], 'token' => $p['token'], 'password' => $pw]]);
 
     case 'participants.delete':
         $acc = trip_access((int)($in['trip_id'] ?? 0));
-        if ($acc['role'] !== 'owner') fail('Nur der Organisator darf Teilnehmer entfernen.', 403);
+        require_owner($acc);
         $p = participant_in_trip((int)($in['id'] ?? 0), (int)$acc['trip']['id']);
         if ($p['is_owner']) fail('Der Organisator kann nicht entfernt werden.');
         db()->beginTransaction();
@@ -312,22 +286,17 @@ switch ($action) {
 
     case 'expenses.create':
     case 'expenses.update':
-        $isUpdate = $action === 'expenses.update';
-        if ($isUpdate) {
+        if ($action === 'expenses.update') {
             $existing = expense_in_trip((int)($in['id'] ?? 0));
-            $acc = trip_access((int)$existing['trip_id']);
-            if ($acc['role'] !== 'owner' && (int)$existing['participant_id'] !== (int)$acc['me']['id']) {
-                fail('Du kannst nur deine eigenen Ausgaben ändern.', 403);
-            }
+            $tripId = (int)$existing['trip_id'];
         } else {
-            $acc = trip_access((int)($in['trip_id'] ?? 0));
+            $existing = null;
+            $tripId = (int)($in['trip_id'] ?? 0);
         }
-        $tripId = (int)$acc['trip']['id'];
-        $payer = $acc['role'] === 'owner' && isset($in['participant_id'])
-            ? (int)participant_in_trip((int)$in['participant_id'], $tripId)['id']
-            : (int)($isUpdate ? $existing['participant_id'] : $acc['me']['id']);
+        $acc = trip_access($tripId);
+        $payer = (int)participant_in_trip((int)($in['participant_id'] ?? 0), $tripId)['id'];
         $values = [$payer, str_in($in, 'description', 200), amount_in($in, 'amount'), date_in($in, 'expense_date')];
-        if ($isUpdate) {
+        if ($existing) {
             db()->prepare('UPDATE expenses SET participant_id = ?, description = ?, amount_cents = ?, expense_date = ? WHERE id = ?')
                 ->execute([...$values, $existing['id']]);
         } else {
@@ -338,10 +307,7 @@ switch ($action) {
 
     case 'expenses.delete':
         $e = expense_in_trip((int)($in['id'] ?? 0));
-        $acc = trip_access((int)$e['trip_id']);
-        if ($acc['role'] !== 'owner' && (int)$e['participant_id'] !== (int)$acc['me']['id']) {
-            fail('Du kannst nur deine eigenen Ausgaben löschen.', 403);
-        }
+        trip_access((int)$e['trip_id']);
         db()->prepare('DELETE FROM expenses WHERE id = ?')->execute([$e['id']]);
         out(trip_payload((int)$e['trip_id']));
 
