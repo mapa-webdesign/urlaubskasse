@@ -23,9 +23,11 @@ tests/                   php tests/settlement_test.php
 1. Subdomain `urlaubskasse.mapa-ai.de` anlegen, SSL aktivieren.
 2. MySQL-Datenbank + Benutzer anlegen.
 3. hPanel → *Git*: Repository `mapa-webdesign/urlaubskasse`, Branch `main`, Zielordner = Webroot der Subdomain (Auto-Deployment per Webhook optional).
-4. Im Dateimanager `config.sample.php` nach `config.php` kopieren und DB-Zugangsdaten eintragen
-   (`config.php` ist nicht versioniert und bleibt bei Deployments erhalten).
-5. Seite aufrufen, registrieren, fertig.
+4. `https://urlaubskasse.mapa-ai.de/setup.php` aufrufen, DB-Name, DB-Benutzer und Passwort eintragen.
+   Die Seite testet die Verbindung, legt die Tabellen an und schreibt `config.php`
+   (nicht versioniert, bleibt bei Deployments erhalten). Sobald die Verbindung funktioniert, ist `setup.php` gesperrt.
+   Alternativ `config.sample.php` manuell nach `config.php` kopieren.
+5. Registrieren, fertig.
 
 ## Lokal entwickeln
 ```
