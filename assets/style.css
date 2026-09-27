@@ -164,3 +164,4 @@ details[open].card summary { margin-bottom: 12px; }
 .picker .btn { min-height: 52px; }
 .whoami { text-align: right; color: var(--muted); }
 .page-head { gap: 12px; flex-wrap: wrap; }
+.invite code { display: block; overflow-wrap: anywhere; word-break: break-all; padding: 8px 10px; }
