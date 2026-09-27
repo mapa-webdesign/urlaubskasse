@@ -132,7 +132,7 @@ function viewAuth(mode) {
   const reg = mode === 'register';
   app.innerHTML = `
     <section class="hero">
-      <img src="assets/logo.svg?v=6" alt="" width="84" height="84" class="hero-logo">
+      <img src="assets/logo.png?v=7" alt="" width="84" height="84" class="hero-logo">
       <h1>Urlaubskosten fair aufteilen</h1>
       <p>Alle tragen ihre Ausgaben ein, die Kosten werden nach Übernachtungen verteilt – und am Ende steht fest, wer wem wieviel überweist.</p>
     </section>
