@@ -23,7 +23,17 @@ function fail(string $msg, int $code = 400): never
 
 set_exception_handler(function (Throwable $e) {
     error_log((string)$e);
-    out(['error' => 'Serverfehler. Bitte später erneut versuchen.'], 500);
+    $msg = 'Serverfehler. Bitte später erneut versuchen.';
+    if (str_contains($e->getMessage(), 'config.php')) {
+        $msg = $e->getMessage();
+    } elseif ($e instanceof PDOException && !db_connected()) {
+        $msg = 'Keine Verbindung zur Datenbank – bitte Zugangsdaten in config.php prüfen.';
+    }
+    try {
+        if (!empty(config()['debug'])) $msg .= ' [' . get_class($e) . ': ' . $e->getMessage() . ']';
+    } catch (Throwable) {
+    }
+    out(['error' => $msg], 500);
 });
 
 // ---- Eingabe-Helfer ----------------------------------------------------

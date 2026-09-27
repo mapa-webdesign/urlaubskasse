@@ -14,6 +14,13 @@ function config(): array
     return $cfg;
 }
 
+function db_connected(?bool $set = null): bool
+{
+    static $connected = false;
+    if ($set !== null) $connected = $set;
+    return $connected;
+}
+
 function db(): PDO
 {
     static $pdo = null;
@@ -30,6 +37,7 @@ function db(): PDO
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
+    db_connected(true);
     if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
         $pdo->exec('PRAGMA foreign_keys = ON');
     }
