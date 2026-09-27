@@ -1,0 +1,30 @@
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # HTTPS erzwingen
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # Versteckte Dateien/Ordner (.git, .env …) sperren, .well-known erlauben
+  RewriteRule (^|/)\.(?!well-known) - [F,L]
+
+  # Interne Ordner sperren
+  RewriteRule ^(lib|tests|data)(/|$) - [F,L]
+
+  # Einladungslink /t/{token}
+  RewriteRule ^t/([a-f0-9]{32})/?$ /#/join/$1 [R=302,NE,L]
+</IfModule>
+
+<FilesMatch "^(config.*\.php|dev-router\.php|.*\.sql|.*\.sqlite|.*\.md)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "same-origin"
+  Header always set X-Frame-Options "DENY"
+</IfModule>
