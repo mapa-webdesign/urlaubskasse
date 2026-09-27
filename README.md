@@ -2,8 +2,9 @@
 
 Web-App zum Abrechnen von Urlaubsgruppen-Ausgaben – https://urlaubskasse.mapa-ai.de
 
-- Organisator registriert sich, legt eine Reise an und lädt Mitreisende mit **eigenem Link + Passwort** ein.
-- Alle tragen ihre Ausgaben und Übernachtungen ein (Teilnehmer nur die eigenen, Organisator alle).
+- Organisator registriert sich, legt eine Reise und die Teilnehmer an und teilt **einen Link** (`/r/{token}`) mit der Gruppe.
+- Wer den Link hat, wählt seinen Namen und trägt Ausgaben und Übernachtungen ein – ohne Anmeldung.
+  Teilnehmer anlegen/entfernen, Reise bearbeiten und Link erneuern kann nur der Organisator.
 - Die App berechnet Gesamtkosten, Übernachtungen, Ausgaben je Person, Kosten pro Person & Nacht,
   den Anteil jeder Person (nach Übernachtungen), offene Beträge und **wer wem wieviel überweist**.
 

@@ -159,3 +159,8 @@ details[open].card summary { margin-bottom: 12px; }
   ul.transfers li strong { grid-column: 1 / -1; }
   h1 { font-size: 1.4rem; }
 }
+
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 8px; }
+.picker .btn { min-height: 52px; }
+.whoami { text-align: right; color: var(--muted); }
+.page-head { gap: 12px; flex-wrap: wrap; }

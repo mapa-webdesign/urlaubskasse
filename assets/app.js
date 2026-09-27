@@ -2,9 +2,9 @@
 
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
-let me = { csrf: '', user: null, joined: [] };
+let me = { csrf: '', user: null };
 let trip = null; // aktuell geladene Reise (Payload von trips.get)
-let lastInvite = null; // zuletzt erzeugte Zugangsdaten (nur einmal sichtbar)
+let ctx = null; // { mode: 'owner', id } oder { mode: 'guest', share }
 let editExpenseId = null;
 
 // ---- Helfer ----------------------------------------------------------------
@@ -17,11 +17,18 @@ const centsToInput = (c) => (c / 100).toFixed(2).replace('.', ',');
 const $ = (sel, root = app) => root.querySelector(sel);
 const $$ = (sel, root = app) => [...root.querySelectorAll(sel)];
 const formData = (form) => Object.fromEntries(new FormData(form).entries());
-const inviteLink = (token) => `${location.origin}/t/${token}`;
+const shareLink = (token) => `${location.origin}/r/${token}`;
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* egal */ } },
+  del(k) { try { localStorage.removeItem(k); } catch { /* egal */ } },
+};
 
 async function api(action, body, params = {}) {
   const qs = new URLSearchParams({ action, ...params });
   const opts = { credentials: 'same-origin', headers: {} };
+  if (ctx?.mode === 'guest') opts.headers['X-Share-Token'] = ctx.share;
   if (body !== undefined) {
     opts.method = 'POST';
     opts.headers['Content-Type'] = 'application/json';
@@ -79,15 +86,16 @@ async function refreshMe() {
 }
 
 function renderNav() {
+  if (ctx?.mode === 'guest' && !me.user) {
+    nav.innerHTML = '';
+    return;
+  }
   if (me.user) {
     nav.innerHTML = `<a href="#/">Meine Reisen</a><span class="muted hide-sm">${esc(me.user.name)}</span><button class="link" id="logout">Abmelden</button>`;
-  } else if (me.joined.length) {
-    nav.innerHTML = `<button class="link" id="logout">Abmelden</button>`;
+    document.getElementById('logout').onclick = async () => { await api('logout', {}); await refreshMe(); location.hash = '#/'; };
   } else {
     nav.innerHTML = '';
   }
-  const lo = document.getElementById('logout');
-  if (lo) lo.onclick = async () => { await api('logout', {}); await refreshMe(); location.hash = '#/'; };
 }
 
 // ---- Router ----------------------------------------------------------------
@@ -96,24 +104,29 @@ async function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   window.scrollTo(0, 0);
   try {
-    if (parts[0] === 'join' && parts[1]) return await viewJoin(parts[1]);
+    if (parts[0] === 'r' && parts[1]) {
+      ctx = { mode: 'guest', share: parts[1] };
+      renderNav();
+      return await viewTrip(parts[2] || 'overview');
+    }
+    ctx = null;
+    renderNav();
     if (parts[0] === 'register') return viewAuth('register');
     if (parts[0] === 'login') return viewAuth('login');
-    if (parts[0] === 'trip' && parts[1]) return await viewTrip(+parts[1], parts[2] || 'overview');
+    if (parts[0] === 'trip' && parts[1]) {
+      ctx = { mode: 'owner', id: +parts[1] };
+      return await viewTrip(parts[2] || 'overview');
+    }
     if (me.user) return await viewDashboard();
-    if (me.joined.length === 1) return (location.hash = `#/trip/${me.joined[0].trip_id}`);
-    if (me.joined.length > 1) return viewJoinedList();
     return viewAuth('login');
   } catch (e) {
-    if (e.status === 401 || e.status === 403) {
-      app.innerHTML = `<div class="card narrow"><h1>Kein Zugriff</h1><p>${esc(e.message)}</p><a class="btn" href="#/login">Zur Anmeldung</a></div>`;
-    } else {
-      app.innerHTML = `<div class="card narrow"><h1>Fehler</h1><p>${esc(e.message)}</p><a class="btn" href="#/">Zur Startseite</a></div>`;
-    }
+    const guest = ctx?.mode === 'guest';
+    app.innerHTML = `<div class="card narrow"><h1>${e.status === 404 && guest ? 'Link ungültig' : e.status === 401 || e.status === 403 ? 'Kein Zugriff' : 'Fehler'}</h1>
+      <p>${esc(e.message)}</p>${guest ? '<p class="muted small">Bitte den Organisator um den aktuellen Link.</p>' : '<a class="btn" href="#/login">Zur Anmeldung</a>'}</div>`;
   }
 }
 
-// ---- Anmeldung -------------------------------------------------------------
+// ---- Anmeldung (Organisator) ------------------------------------------------
 
 function viewAuth(mode) {
   const reg = mode === 'register';
@@ -134,44 +147,14 @@ function viewAuth(mode) {
         <button type="submit" class="btn primary">${reg ? 'Konto anlegen' : 'Anmelden'}</button>
       </form>
       <p class="muted small">${reg
-        ? 'Als Organisator legst du Reisen an und lädst deine Mitreisenden per Link + Passwort ein.'
-        : 'Eingeladen worden? Nutze einfach den Link aus deiner Einladung.'}</p>
+        ? 'Als Organisator legst du Reisen und Teilnehmer an und teilst einen Link mit der Gruppe.'
+        : 'Mitreisende brauchen kein Konto – sie nutzen einfach den Link zur Reise.'}</p>
     </div>`;
   onSubmit($('#auth'), async (d) => {
     await api(reg ? 'register' : 'login', d);
     await refreshMe();
     location.hash = '#/';
   });
-}
-
-async function viewJoin(token) {
-  let info;
-  try {
-    info = await api('join.info', undefined, { token });
-  } catch (e) {
-    app.innerHTML = `<div class="card narrow"><h1>Einladung ungültig</h1><p>${esc(e.message)} Bitte den Organisator um einen neuen Link.</p></div>`;
-    return;
-  }
-  app.innerHTML = `
-    <div class="card narrow">
-      <p class="eyebrow">Einladung</p>
-      <h1>${esc(info.trip_name)}</h1>
-      <p>Hallo <strong>${esc(info.name)}</strong>! Gib das Passwort aus deiner Einladung ein, um deine Ausgaben und Übernachtungen einzutragen.</p>
-      <form id="join" class="form">
-        <label>Passwort<input name="password" type="password" required autocomplete="current-password" autofocus></label>
-        <button type="submit" class="btn primary">Weiter</button>
-      </form>
-    </div>`;
-  onSubmit($('#join'), async (d) => {
-    const r = await api('join', { token, password: d.password.trim() });
-    await refreshMe();
-    location.hash = `#/trip/${r.trip_id}`;
-  });
-}
-
-function viewJoinedList() {
-  app.innerHTML = `<h1>Deine Reisen</h1><div class="list">${me.joined.map((j) => `
-    <a class="card row link-card" href="#/trip/${j.trip_id}"><strong>${esc(j.trip_name)}</strong><span class="muted">als ${esc(j.name)}</span></a>`).join('')}</div>`;
 }
 
 // ---- Dashboard -------------------------------------------------------------
@@ -220,14 +203,24 @@ function dateRange(t) {
 
 // ---- Reise -----------------------------------------------------------------
 
-async function viewTrip(id, tab) {
-  trip = await api('trips.get', undefined, { id });
+const isOwner = () => trip?.role === 'owner';
+const tripBase = () => (ctx.mode === 'guest' ? `#/r/${ctx.share}` : `#/trip/${ctx.id}`);
+const meKey = () => `uk_me_${ctx.share}`;
+
+/** Gewählte Person: Organisator = eigener Teilnehmer, Gast = im Browser gemerkte Auswahl. */
+function meId() {
+  if (ctx.mode === 'owner') return trip.participants.find((p) => p.is_owner)?.id ?? null;
+  const id = +store.get(meKey());
+  return trip.participants.some((p) => p.id === id) ? id : null;
+}
+
+async function viewTrip(tab) {
+  trip = ctx.mode === 'guest' ? await api('trips.get') : await api('trips.get', undefined, { id: ctx.id });
   renderTrip(tab);
 }
 
 function setTrip(payload, tab) {
-  trip = { ...trip, ...payload };
-  delete trip.invite;
+  trip = payload;
   renderTrip(tab);
 }
 
@@ -235,28 +228,45 @@ function nameOf(pid) {
   return trip.participants.find((p) => p.id === pid)?.name ?? '?';
 }
 
+function renderPicker() {
+  const t = trip.trip;
+  app.innerHTML = `
+    <div class="card narrow">
+      <p class="eyebrow">Urlaubskasse</p>
+      <h1>${esc(t.name)}</h1>
+      ${t.start_date || t.end_date ? `<p class="muted small">${fmtDate(t.start_date)} – ${fmtDate(t.end_date)}</p>` : ''}
+      <p>Wer bist du?</p>
+      <div class="picker">${trip.participants.map((p) => `<button class="btn" data-pick="${p.id}">${esc(p.name)}</button>`).join('')}</div>
+    </div>`;
+  $$('[data-pick]').forEach((b) => (b.onclick = () => { store.set(meKey(), b.dataset.pick); renderTrip('overview'); }));
+}
+
 function renderTrip(tab) {
-  const isOwner = trip.role === 'owner';
+  if (ctx.mode === 'guest' && !meId()) return renderPicker();
   const tabs = [['overview', 'Übersicht'], ['expenses', 'Ausgaben'], ['people', 'Teilnehmer']];
   const t = trip.trip;
   app.innerHTML = `
     <div class="trip-view">
       <div class="page-head">
         <div>
-          ${isOwner ? '<a href="#/" class="muted small">← Meine Reisen</a>' : ''}
+          ${isOwner() && ctx.mode === 'owner' ? '<a href="#/" class="muted small">← Meine Reisen</a>' : ''}
           <h1>${esc(t.name)}</h1>
           ${t.start_date || t.end_date ? `<p class="muted small">${fmtDate(t.start_date)} – ${fmtDate(t.end_date)}</p>` : ''}
         </div>
+        ${ctx.mode === 'guest' ? `<div class="whoami small">Du bist <strong>${esc(nameOf(meId()))}</strong> · <button class="link" id="switch">wechseln</button></div>` : ''}
       </div>
-      <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/trip/${t.id}/${k}" class="${k === tab ? 'active' : ''}">${l}</a>`).join('')}</nav>
+      <nav class="tabs">${tabs.map(([k, l]) => `<a href="${tripBase()}/${k}" class="${k === tab ? 'active' : ''}">${l}</a>`).join('')}</nav>
       <div id="tab"></div>
     </div>`;
+  const sw = $('#switch');
+  if (sw) sw.onclick = () => { store.del(meKey()); renderPicker(); };
   ({ overview: renderOverview, expenses: renderExpenses, people: renderPeople }[tab] || renderOverview)();
 }
 
 function renderOverview() {
   const s = trip.settlement;
-  const mine = s.people.find((p) => p.id === trip.me_id);
+  const myId = meId();
+  const mine = s.people.find((p) => p.id === myId);
   let status = '';
   if (mine && s.computable && mine.balance_cents !== null) {
     if (mine.balance_cents < 0) status = `<div class="callout warn">Du musst noch <strong>${money(-mine.balance_cents)}</strong> zahlen.</div>`;
@@ -283,7 +293,7 @@ function renderOverview() {
       <div class="table-wrap"><table>
         <thead><tr><th>Name</th><th class="num">Nächte</th><th class="num">Ausgaben</th><th class="num">Anteil</th><th class="num">Saldo</th></tr></thead>
         <tbody>${s.people.map((p) => `
-          <tr class="${p.id === trip.me_id ? 'me' : ''}">
+          <tr class="${p.id === myId ? 'me' : ''}">
             <td>${esc(p.name)}</td><td class="num">${p.nights}</td><td class="num">${money(p.paid_cents)}</td>
             <td class="num">${p.share_cents === null ? '–' : money(p.share_cents)}</td><td class="num">${bal(p)}</td>
           </tr>`).join('')}</tbody>
@@ -294,21 +304,17 @@ function renderOverview() {
     <div class="card">
       <h2>Wer überweist wem?</h2>
       ${s.transfers.length ? `<ul class="transfers">${s.transfers.map((tr) => `
-        <li class="${tr.from === trip.me_id || tr.to === trip.me_id ? 'me' : ''}">
+        <li class="${tr.from === myId || tr.to === myId ? 'me' : ''}">
           <span>${esc(nameOf(tr.from))}</span><span class="arrow">→</span><span>${esc(nameOf(tr.to))}</span><strong>${money(tr.amount_cents)}</strong>
         </li>`).join('')}</ul>`
       : `<p class="muted">${s.total_cents ? 'Alles ausgeglichen – keine Überweisungen nötig.' : 'Noch keine Ausgaben erfasst.'}</p>`}
     </div>`;
 }
 
-function canEditExpense(e) {
-  return trip.role === 'owner' || e.participant_id === trip.me_id;
-}
-
 function renderExpenses() {
-  const isOwner = trip.role === 'owner';
   const editing = trip.expenses.find((e) => e.id === editExpenseId) || null;
-  const payerId = editing ? editing.participant_id : trip.me_id;
+  const myId = meId();
+  const payerId = editing ? editing.participant_id : myId;
   const today = new Date().toISOString().slice(0, 10);
   $('#tab').innerHTML = `
     <div class="card">
@@ -317,7 +323,7 @@ function renderExpenses() {
         <label class="span2">Wofür?<input name="description" required maxlength="200" placeholder="z. B. Supermarkt, Ferienhaus, Tanken" value="${esc(editing?.description)}"></label>
         <label>Betrag (€)<input name="amount" required inputmode="decimal" placeholder="0,00" value="${editing ? centsToInput(editing.amount_cents) : ''}"></label>
         <label>Datum<input name="expense_date" type="date" value="${esc(editing ? editing.expense_date || '' : today)}"></label>
-        ${isOwner ? `<label class="span2">Bezahlt von<select name="participant_id">${trip.participants.map((p) => `<option value="${p.id}" ${p.id === payerId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>` : ''}
+        <label class="span2">Bezahlt von<select name="participant_id">${trip.participants.map((p) => `<option value="${p.id}" ${p.id === payerId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
         <div class="span2 actions">
           <button type="submit" class="btn primary">${editing ? 'Speichern' : 'Hinzufügen'}</button>
           ${editing ? '<button type="button" class="btn" id="cancel">Abbrechen</button>' : ''}
@@ -327,17 +333,16 @@ function renderExpenses() {
     <div class="card">
       <h2>Alle Ausgaben <span class="muted">(${trip.expenses.length})</span></h2>
       ${trip.expenses.length ? `<ul class="expenses">${trip.expenses.map((e) => `
-        <li class="${e.participant_id === trip.me_id ? 'me' : ''}">
+        <li class="${e.participant_id === myId ? 'me' : ''}">
           <div class="grow"><strong>${esc(e.description)}</strong>
             <div class="muted small">${esc(nameOf(e.participant_id))}${e.expense_date ? ' · ' + fmtDate(e.expense_date) : ''}</div></div>
           <span class="amount">${money(e.amount_cents)}</span>
-          ${canEditExpense(e) ? `<span class="row-actions"><button class="icon" data-edit="${e.id}" title="Bearbeiten" aria-label="Bearbeiten">✎</button><button class="icon danger" data-del="${e.id}" title="Löschen" aria-label="Löschen">✕</button></span>` : ''}
+          <span class="row-actions"><button class="icon" data-edit="${e.id}" title="Bearbeiten" aria-label="Bearbeiten">✎</button><button class="icon danger" data-del="${e.id}" title="Löschen" aria-label="Löschen">✕</button></span>
         </li>`).join('')}</ul>` : '<p class="muted">Noch keine Ausgaben.</p>'}
     </div>`;
 
-  const form = $('#expform');
-  onSubmit(form, async (d) => {
-    if (d.participant_id) d.participant_id = +d.participant_id;
+  onSubmit($('#expform'), async (d) => {
+    d.participant_id = +d.participant_id;
     const payload = editing
       ? await api('expenses.update', { ...d, id: editing.id })
       : await api('expenses.create', { ...d, trip_id: trip.trip.id });
@@ -347,7 +352,7 @@ function renderExpenses() {
   });
   const cancel = $('#cancel');
   if (cancel) cancel.onclick = () => { editExpenseId = null; renderExpenses(); };
-  $$('[data-edit]').forEach((b) => (b.onclick = () => { editExpenseId = +b.dataset.edit; renderExpenses(); }));
+  $$('[data-edit]').forEach((b) => (b.onclick = () => { editExpenseId = +b.dataset.edit; renderExpenses(); window.scrollTo(0, 0); }));
   $$('[data-del]').forEach((b) => (b.onclick = async () => {
     if (!confirm('Diese Ausgabe löschen?')) return;
     try {
@@ -357,104 +362,89 @@ function renderExpenses() {
   }));
 }
 
-function inviteText(name, token, password) {
-  return `Hallo ${name}! Trag deine Ausgaben und Übernachtungen für „${trip.trip.name}“ in der Urlaubskasse ein:\n${inviteLink(token)}\nPasswort: ${password}`;
-}
-
 function renderPeople() {
-  const isOwner = trip.role === 'owner';
-  const inv = lastInvite && trip.participants.find((p) => p.id === lastInvite.id);
+  const owner = isOwner();
+  const myId = meId();
+  const t = trip.trip;
+  const link = t.share_token ? shareLink(t.share_token) : '';
+  const shareText = `Trag deine Ausgaben für „${t.name}“ in der Urlaubskasse ein:\n${link}`;
   $('#tab').innerHTML = `
-    ${inv ? `
+    ${owner ? `
       <div class="card invite">
-        <h2>Einladung für ${esc(inv.name)}</h2>
-        <p class="muted small">Das Passwort wird nur jetzt angezeigt. Bei Verlust kannst du ein neues erzeugen.</p>
-        <dl><dt>Link</dt><dd><code>${esc(inviteLink(lastInvite.token))}</code></dd><dt>Passwort</dt><dd><code>${esc(lastInvite.password)}</code></dd></dl>
+        <h2>Link für die Gruppe</h2>
+        <p class="muted small">Alle mit diesem Link können ihren Namen wählen, Ausgaben eintragen und Übernachtungen ändern – ohne Anmeldung.</p>
+        <p><code>${esc(link)}</code></p>
         <div class="actions">
-          <button class="btn primary" id="copyinv">Einladung kopieren</button>
-          <a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(inviteText(inv.name, lastInvite.token, lastInvite.password))}">Per WhatsApp senden</a>
-          <button class="btn" id="closeinv">Fertig</button>
+          <button class="btn primary" id="copylink">Link kopieren</button>
+          <a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(shareText)}">Per WhatsApp senden</a>
+          <button class="btn danger" id="resetlink">Neuen Link erzeugen</button>
         </div>
       </div>` : ''}
     <div class="card">
       <h2>Teilnehmer &amp; Übernachtungen</h2>
-      <ul class="people">${trip.participants.map((p) => {
-        const editable = isOwner || p.id === trip.me_id;
-        return `<li class="${p.id === trip.me_id ? 'me' : ''}">
+      <ul class="people">${trip.participants.map((p) => `
+        <li class="${p.id === myId ? 'me' : ''}">
           <form class="person" data-id="${p.id}">
-            ${editable ? `<input name="name" value="${esc(p.name)}" required maxlength="100" aria-label="Name">` : `<span class="grow">${esc(p.name)}</span>`}
-            <label class="nights">${editable ? `<input name="nights" type="number" min="0" max="1000" value="${p.nights}" inputmode="numeric" aria-label="Übernachtungen">` : `<strong>${p.nights}</strong>`} Nächte</label>
-            ${editable ? '<button type="submit" class="btn small">Speichern</button>' : ''}
+            ${owner ? `<input name="name" value="${esc(p.name)}" required maxlength="100" aria-label="Name">` : `<span class="grow">${esc(p.name)}</span>`}
+            <label class="nights"><input name="nights" type="number" min="0" max="1000" value="${p.nights}" inputmode="numeric" aria-label="Übernachtungen"> Nächte</label>
+            <button type="submit" class="btn small">Speichern</button>
           </form>
-          ${isOwner ? `<div class="row-actions">
-            ${p.is_owner ? '<span class="badge">Organisator</span>' : `
-              <button class="btn small" data-link="${p.id}">Link kopieren</button>
-              <button class="btn small" data-reset="${p.id}">Neues Passwort</button>
-              <button class="btn small danger" data-remove="${p.id}">Entfernen</button>`}
-          </div>` : ''}
-        </li>`;
-      }).join('')}</ul>
+          ${owner ? `<div class="row-actions">${p.is_owner ? '<span class="badge">Organisator</span>' : `<button class="btn small danger" data-remove="${p.id}">Entfernen</button>`}</div>` : ''}
+        </li>`).join('')}</ul>
     </div>
-    ${isOwner ? `
+    ${owner ? `
       <div class="card">
-        <h2>Mitreisende einladen</h2>
+        <h2>Teilnehmer hinzufügen</h2>
         <form id="addperson" class="form grid">
           <label>Name<input name="name" required maxlength="100"></label>
           <label>Übernachtungen<input name="nights" type="number" min="0" max="1000" value="${trip.participants[0]?.nights ?? 0}" inputmode="numeric"></label>
-          <div class="span2"><button type="submit" class="btn primary">Hinzufügen &amp; Einladung erstellen</button></div>
+          <div class="span2"><button type="submit" class="btn primary">Hinzufügen</button></div>
         </form>
       </div>
       <details class="card">
         <summary><h2>Reise bearbeiten</h2></summary>
         <form id="edittrip" class="form grid">
-          <label class="span2">Name<input name="name" required maxlength="150" value="${esc(trip.trip.name)}"></label>
-          <label>Anreise<input name="start_date" type="date" value="${esc(trip.trip.start_date || '')}"></label>
-          <label>Abreise<input name="end_date" type="date" value="${esc(trip.trip.end_date || '')}"></label>
+          <label class="span2">Name<input name="name" required maxlength="150" value="${esc(t.name)}"></label>
+          <label>Anreise<input name="start_date" type="date" value="${esc(t.start_date || '')}"></label>
+          <label>Abreise<input name="end_date" type="date" value="${esc(t.end_date || '')}"></label>
           <div class="span2 actions"><button type="submit" class="btn primary">Speichern</button><button type="button" class="btn danger" id="deltrip">Reise löschen</button></div>
         </form>
       </details>` : ''}`;
 
   $$('form.person').forEach((f) => onSubmit(f, async (d) => {
-    setTrip(await api('participants.update', { ...d, id: +f.dataset.id, trip_id: trip.trip.id }), 'people');
+    setTrip(await api('participants.update', { ...d, id: +f.dataset.id, trip_id: t.id }), 'people');
     toast('Gespeichert.');
   }));
 
-  if (!isOwner) return;
-  const find = (id) => trip.participants.find((p) => p.id === id);
-  if (inv) {
-    $('#copyinv').onclick = () => copy(inviteText(inv.name, lastInvite.token, lastInvite.password));
-    $('#closeinv').onclick = () => { lastInvite = null; renderPeople(); };
-  }
-  $$('[data-link]').forEach((b) => (b.onclick = () => copy(inviteLink(find(+b.dataset.link).token))));
-  $$('[data-reset]').forEach((b) => (b.onclick = async () => {
-    const p = find(+b.dataset.reset);
-    if (!confirm(`Neues Passwort für ${p.name} erzeugen? Das alte Passwort funktioniert dann nicht mehr.`)) return;
+  if (!owner) return;
+  $('#copylink').onclick = () => copy(link);
+  $('#resetlink').onclick = async () => {
+    if (!confirm('Neuen Link erzeugen? Der bisherige Link funktioniert dann nicht mehr.')) return;
     try {
-      lastInvite = (await api('participants.resetPassword', { id: p.id, trip_id: trip.trip.id })).invite;
-      renderPeople();
+      setTrip(await api('trips.resetShare', { id: t.id }), 'people');
+      toast('Neuer Link erzeugt.');
     } catch (e) { toast(e.message, true); }
-  }));
+  };
   $$('[data-remove]').forEach((b) => (b.onclick = async () => {
-    const p = find(+b.dataset.remove);
+    const p = trip.participants.find((x) => x.id === +b.dataset.remove);
     if (!confirm(`${p.name} entfernen? Alle Ausgaben dieser Person werden ebenfalls gelöscht.`)) return;
     try {
-      setTrip(await api('participants.delete', { id: p.id, trip_id: trip.trip.id }), 'people');
+      setTrip(await api('participants.delete', { id: p.id, trip_id: t.id }), 'people');
     } catch (e) { toast(e.message, true); }
   }));
-  onSubmit($('#addperson'), async (d, form) => {
-    const r = await api('participants.create', { ...d, trip_id: trip.trip.id });
-    lastInvite = r.invite;
-    setTrip(r, 'people');
-    form.reset();
+  onSubmit($('#addperson'), async (d) => {
+    setTrip(await api('participants.create', { ...d, trip_id: t.id }), 'people');
+    toast('Teilnehmer hinzugefügt.');
+    $('#addperson input[name=name]')?.focus();
   });
   onSubmit($('#edittrip'), async (d) => {
-    setTrip(await api('trips.update', { ...d, id: trip.trip.id }), 'people');
+    setTrip(await api('trips.update', { ...d, id: t.id }), 'people');
     toast('Reise gespeichert.');
   });
   $('#deltrip').onclick = async () => {
-    if (!confirm(`„${trip.trip.name}“ mit allen Teilnehmern und Ausgaben endgültig löschen?`)) return;
+    if (!confirm(`„${t.name}“ mit allen Teilnehmern und Ausgaben endgültig löschen?`)) return;
     try {
-      await api('trips.delete', { id: trip.trip.id });
+      await api('trips.delete', { id: t.id });
       trip = null;
       location.hash = '#/';
     } catch (e) { toast(e.message, true); }
@@ -465,7 +455,6 @@ function renderPeople() {
 
 window.addEventListener('hashchange', () => {
   editExpenseId = null;
-  if (!location.hash.includes('/people')) lastInvite = null;
   route();
 });
 

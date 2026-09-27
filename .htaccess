@@ -15,8 +15,8 @@ DirectoryIndex index.html
   # Interne Ordner sperren
   RewriteRule ^(lib|tests|data)(/|$) - [F,L]
 
-  # Einladungslink /t/{token}
-  RewriteRule ^t/([a-f0-9]{32})/?$ /#/join/$1 [R=302,NE,L]
+  # Reise-Link /r/{token}
+  RewriteRule ^r/([a-f0-9]{32})/?$ /#/r/$1 [R=302,NE,L]
 </IfModule>
 
 <FilesMatch "^(config.*\.php|dev-router\.php|.*\.sql|.*\.sqlite|.*\.md)$">

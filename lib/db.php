@@ -54,6 +54,7 @@ function ensure_schema(PDO $pdo): void
 {
     try {
         $pdo->query('SELECT 1 FROM login_attempts LIMIT 1');
+        migrate_share_token($pdo);
         return;
     } catch (PDOException) {
         // Tabellen fehlen -> anlegen
@@ -77,6 +78,7 @@ function ensure_schema(PDO $pdo): void
             name VARCHAR(150) NOT NULL,
             start_date DATE NULL,
             end_date DATE NULL,
+            share_token CHAR(32) NULL UNIQUE,
             created_at DATETIME NOT NULL,
             FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
         )$tail",
@@ -111,6 +113,23 @@ function ensure_schema(PDO $pdo): void
     ];
     foreach ($stmts as $sql) {
         $pdo->exec($sql);
+    }
+}
+
+/** Nachrüsten von trips.share_token für bestehende Datenbanken. */
+function migrate_share_token(PDO $pdo): void
+{
+    try {
+        $pdo->query('SELECT share_token FROM trips LIMIT 1');
+        return;
+    } catch (PDOException) {
+        // Spalte fehlt
+    }
+    $pdo->exec('ALTER TABLE trips ADD COLUMN share_token CHAR(32) NULL');
+    $pdo->exec('CREATE UNIQUE INDEX idx_trips_share_token ON trips (share_token)');
+    $upd = $pdo->prepare('UPDATE trips SET share_token = ? WHERE id = ?');
+    foreach ($pdo->query('SELECT id FROM trips')->fetchAll(PDO::FETCH_COLUMN) as $id) {
+        $upd->execute([bin2hex(random_bytes(16)), $id]);
     }
 }
 

@@ -18,7 +18,6 @@ function start_session(): void
     if (empty($_SESSION['csrf'])) {
         $_SESSION['csrf'] = bin2hex(random_bytes(16));
     }
-    $_SESSION['joined'] ??= [];
 }
 
 function check_csrf(): void
@@ -68,24 +67,20 @@ function require_user(): int
     return $uid;
 }
 
-function generate_password(): string
-{
-    $chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-    $pw = '';
-    for ($i = 0; $i < 10; $i++) {
-        $pw .= $chars[random_int(0, strlen($chars) - 1)];
-    }
-    return $pw;
-}
-
 function generate_token(): string
 {
     return bin2hex(random_bytes(16));
 }
 
+/** Share-Token aus dem Request (Header oder Query). */
+function share_token_in(): string
+{
+    return (string)($_SERVER['HTTP_X_SHARE_TOKEN'] ?? $_GET['share'] ?? '');
+}
+
 /**
- * Prüft den Zugriff auf eine Reise.
- * @return array{trip: array, role: string, me: array}
+ * Prüft den Zugriff auf eine Reise: Organisator (Session) oder Gast (gültiger Reise-Link).
+ * @return array{trip: array, role: string}
  */
 function trip_access(int $tripId): array
 {
@@ -96,18 +91,16 @@ function trip_access(int $tripId): array
 
     $uid = current_user_id();
     if ($uid !== null && (int)$trip['owner_user_id'] === $uid) {
-        $st = db()->prepare('SELECT * FROM participants WHERE trip_id = ? AND is_owner = 1');
-        $st->execute([$tripId]);
-        return ['trip' => $trip, 'role' => 'owner', 'me' => $st->fetch() ?: null];
+        return ['trip' => $trip, 'role' => 'owner'];
     }
+    $share = share_token_in();
+    if ($share !== '' && $trip['share_token'] !== null && hash_equals($trip['share_token'], $share)) {
+        return ['trip' => $trip, 'role' => 'guest'];
+    }
+    fail('Kein Zugriff auf diese Reise. Ist der Link noch aktuell?', 403);
+}
 
-    $pid = $_SESSION['joined'][$tripId] ?? null;
-    if ($pid !== null) {
-        $st = db()->prepare('SELECT * FROM participants WHERE id = ? AND trip_id = ?');
-        $st->execute([$pid, $tripId]);
-        $me = $st->fetch();
-        if ($me) return ['trip' => $trip, 'role' => 'participant', 'me' => $me];
-        unset($_SESSION['joined'][$tripId]);
-    }
-    fail('Kein Zugriff auf diese Reise.', 403);
+function require_owner(array $acc): void
+{
+    if ($acc['role'] !== 'owner') fail('Das darf nur der Organisator.', 403);
 }
