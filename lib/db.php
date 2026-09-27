@@ -7,7 +7,7 @@ function config(): array
     if ($cfg === null) {
         $file = dirname(__DIR__) . '/config.php';
         if (!is_file($file)) {
-            throw new RuntimeException('config.php fehlt – bitte aus config.sample.php anlegen.');
+            throw new RuntimeException('config.php fehlt – bitte Einrichtung unter /setup.php aufrufen.');
         }
         $cfg = require $file;
     }
@@ -27,21 +27,26 @@ function db(): PDO
     if ($pdo !== null) return $pdo;
 
     $cfg = config();
-    $dsn = $cfg['db_dsn'];
+    $pdo = db_connect($cfg['db_dsn'], $cfg['db_user'] ?? null, $cfg['db_pass'] ?? null);
+    db_connected(true);
+    ensure_schema($pdo);
+    return $pdo;
+}
+
+function db_connect(string $dsn, ?string $user, ?string $pass): PDO
+{
     if (str_starts_with($dsn, 'sqlite:')) {
         $dir = dirname(substr($dsn, 7));
         if (!is_dir($dir)) mkdir($dir, 0700, true);
     }
-    $pdo = new PDO($dsn, $cfg['db_user'] ?? null, $cfg['db_pass'] ?? null, [
+    $pdo = new PDO($dsn, $user, $pass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
-    db_connected(true);
     if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
         $pdo->exec('PRAGMA foreign_keys = ON');
     }
-    ensure_schema($pdo);
     return $pdo;
 }
 

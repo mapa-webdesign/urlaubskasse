@@ -27,7 +27,7 @@ set_exception_handler(function (Throwable $e) {
     if (str_contains($e->getMessage(), 'config.php')) {
         $msg = $e->getMessage();
     } elseif ($e instanceof PDOException && !db_connected()) {
-        $msg = 'Keine Verbindung zur Datenbank – bitte Zugangsdaten in config.php prüfen.';
+        $msg = 'Keine Verbindung zur Datenbank – bitte Zugangsdaten unter /setup.php prüfen.';
     }
     try {
         if (!empty(config()['debug'])) $msg .= ' [' . get_class($e) . ': ' . $e->getMessage() . ']';
